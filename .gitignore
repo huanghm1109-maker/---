@@ -6,3 +6,6 @@ __pycache__/
 *.py[cod]
 # 忽略本地环境变量文件
 .env
+
+# ECDICT 原始 CSV 只用于生成 data/ecdict.sqlite3
+.ecdict-source/

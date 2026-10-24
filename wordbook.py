@@ -1,11 +1,9 @@
-import html
 import json
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QUrlQuery
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -19,9 +17,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from offline_dictionary import (
+    DictionaryUnavailableError,
+    InvalidWordError,
+    OfflineDictionary,
+)
 
 DATA_FILE = Path(__file__).resolve().with_name("words.json")
-TRANSLATION_TIMEOUT_MS = 12_000
 
 
 class WordBookWidget(QWidget):
@@ -30,10 +32,7 @@ class WordBookWidget(QWidget):
         self.load_error = None
         self.words = self.load_words()
         self.translation_word = ""
-        self.active_reply = None
-        self.source_language = ""
-        self.target_language = ""
-        self.network = QNetworkAccessManager(self)
+        self.dictionary = OfflineDictionary()
 
         self.init_ui()
         self.refresh_list()
@@ -63,7 +62,7 @@ class WordBookWidget(QWidget):
 
         input_row = QHBoxLayout()
         self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("输入生词，按回车添加...")
+        self.input_field.setPlaceholderText("输入英文单词，按回车添加...")
         self.input_field.setMaxLength(100)
         self.input_field.returnPressed.connect(self.add_word)
 
@@ -103,7 +102,7 @@ class WordBookWidget(QWidget):
         action_row = QHBoxLayout()
         action_row.addStretch()
 
-        self.translate_btn = QPushButton("翻译选中")
+        self.translate_btn = QPushButton("查词典")
         self.translate_btn.clicked.connect(self.translate_selected)
 
         delete_btn = QPushButton("删除选中")
@@ -117,7 +116,9 @@ class WordBookWidget(QWidget):
         action_row.addWidget(delete_btn)
         layout.addLayout(action_row)
 
-        self.translation_label = QLabel("选中生词后点击“翻译选中”，双击单词也可以翻译。")
+        self.translation_label = QLabel(
+            "选中生词后点击“查词典”，从本地 ECDICT 离线词典读取释义。"
+        )
         self.translation_label.setWordWrap(True)
         self.translation_label.setMinimumHeight(64)
         self.translation_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -143,8 +144,14 @@ class WordBookWidget(QWidget):
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def add_word(self):
-        word = self.input_field.text().strip()
-        if not word:
+        word = self.input_field.text()
+        try:
+            self.dictionary.validate_word(word)
+        except InvalidWordError as error:
+            self.show_input_error(str(error))
+            return
+        except DictionaryUnavailableError as error:
+            self.show_dictionary_error(str(error))
             return
 
         if any(existing.casefold() == word.casefold() for existing in self.words):
@@ -161,6 +168,12 @@ class WordBookWidget(QWidget):
         self.input_field.clear()
         self.search_field.clear()
         self.refresh_list(selected_word=word)
+
+    def show_input_error(self, message):
+        self.translation_label.setText(message)
+        self.input_field.setFocus()
+        self.input_field.selectAll()
+        QMessageBox.warning(self, "输入错误", message)
 
     def refresh_list(self, *_args, selected_word=None):
         keep_word = selected_word if selected_word is not None else self.current_word()
@@ -195,9 +208,7 @@ class WordBookWidget(QWidget):
             return
         word = current.data(Qt.ItemDataRole.UserRole)
         if word != self.translation_word:
-            self.translation_label.setText(
-                f"已选择“{word}”，点击“翻译选中”查看释义。"
-            )
+            self.translation_label.setText(f"已选择“{word}”，点击“查词典”查看释义。")
 
     def translate_selected(self):
         word = self.current_word()
@@ -210,161 +221,32 @@ class WordBookWidget(QWidget):
         if not word:
             return
 
-        self.abort_active_request()
         self.translation_word = word
-        self.translation_label.setText(f"正在翻译“{word}”…")
-        self.translate_btn.setEnabled(False)
-
-        if self.contains_chinese(word):
-            self.source_language = "zh-CN"
-            self.target_language = "en"
-        else:
-            self.source_language = "auto"
-            self.target_language = "zh-CN"
-
-        request_url = QUrl("https://translate.googleapis.com/translate_a/single")
-        query = QUrlQuery()
-        query.addQueryItem("client", "gtx")
-        query.addQueryItem("sl", self.source_language)
-        query.addQueryItem("tl", self.target_language)
-        query.addQueryItem("dt", "t")
-        query.addQueryItem("dt", "bd")
-        query.addQueryItem("q", word)
-        request_url.setQuery(query)
-
-        request = QNetworkRequest(request_url)
-        request.setTransferTimeout(TRANSLATION_TIMEOUT_MS)
-        request.setHeader(
-            QNetworkRequest.KnownHeaders.UserAgentHeader,
-            "Mozilla/5.0 WordBook/1.0",
-        )
-        reply = self.network.get(request)
-        self.active_reply = reply
-        reply.finished.connect(lambda: self.handle_google_reply(reply))
-
-    def handle_google_reply(self, reply):
-        self.active_reply = None
-        word = self.translation_word
-
-        if reply.error() == QNetworkReply.NetworkError.NoError:
-            try:
-                raw_data = bytes(reply.readAll()).decode("utf-8")
-                translation = self.parse_google_response(raw_data)
-            except (UnicodeDecodeError, ValueError, TypeError, IndexError):
-                translation = ""
-            finally:
-                reply.deleteLater()
-
-            if translation:
-                self.show_translation(word, translation)
-                return
-        else:
-            reply.deleteLater()
-
-        self.translate_with_fallback(word)
-
-    def translate_with_fallback(self, word):
-        fallback_source = self.source_language
-        if fallback_source == "auto":
-            fallback_source = "en"
-
-        request_url = QUrl("https://api.mymemory.translated.net/get")
-        query = QUrlQuery()
-        query.addQueryItem("q", word)
-        query.addQueryItem("langpair", f"{fallback_source}|{self.target_language}")
-        request_url.setQuery(query)
-
-        self.translation_label.setText(f"正在通过备用翻译服务翻译“{word}”…")
-        request = QNetworkRequest(request_url)
-        request.setTransferTimeout(TRANSLATION_TIMEOUT_MS)
-        request.setHeader(
-            QNetworkRequest.KnownHeaders.UserAgentHeader,
-            "Mozilla/5.0 WordBook/1.0",
-        )
-        reply = self.network.get(request)
-        self.active_reply = reply
-        reply.finished.connect(lambda: self.handle_fallback_reply(reply))
-
-    def handle_fallback_reply(self, reply):
-        self.active_reply = None
-        word = self.translation_word
-
-        if reply.error() != QNetworkReply.NetworkError.NoError:
-            self.show_translation_error(word, "网络连接失败，请检查网络后重试。")
-            reply.deleteLater()
-            return
-
         try:
-            data = json.loads(bytes(reply.readAll()).decode("utf-8"))
-            translation = data.get("responseData", {}).get("translatedText", "")
-            translation = html.unescape(translation).strip()
-        except (UnicodeDecodeError, ValueError, TypeError, AttributeError):
-            translation = ""
-        finally:
-            reply.deleteLater()
-
-        if not translation:
-            self.show_translation_error(word, "翻译服务暂时不可用，请稍后重试。")
+            entry = self.dictionary.lookup(word)
+        except DictionaryUnavailableError as error:
+            self.show_dictionary_error(str(error))
             return
-        self.show_translation(word, translation)
+        if entry is None:
+            self.show_dictionary_error(f"离线词典中找不到“{word}”，请检查拼写。")
+            return
 
-    @staticmethod
-    def parse_google_response(raw_data):
-        data = json.loads(raw_data)
-        segments = data[0] if isinstance(data, list) and data else []
-        main_translation = "".join(
-            segment[0]
-            for segment in segments
-            if isinstance(segment, list)
-            and segment
-            and isinstance(segment[0], str)
-        ).strip()
-
-        meanings = []
-        dictionary_groups = data[1] if len(data) > 1 and isinstance(data[1], list) else []
-        for group in dictionary_groups:
-            if not isinstance(group, list) or len(group) < 2:
-                continue
-            for meaning in group[1]:
-                if (
-                    isinstance(meaning, str)
-                    and meaning
-                    and meaning != main_translation
-                    and meaning not in meanings
-                ):
-                    meanings.append(meaning)
-
-        if meanings:
-            return f"{main_translation}\n其他释义：{'、'.join(meanings[:8])}"
-        return main_translation
-
-    @staticmethod
-    def contains_chinese(text):
-        return any("\u4e00" <= character <= "\u9fff" for character in text)
+        translation = entry.translation or entry.definition or "词典中没有释义。"
+        translation = translation.replace("\\n", "\n")
+        phonetic = f"/{entry.phonetic}/" if entry.phonetic else ""
+        lines = [f"“{entry.word}”"]
+        if phonetic:
+            lines.append(phonetic)
+        lines.append(translation)
+        self.show_translation(word, "\n".join(lines))
 
     def show_translation(self, word, translation):
         if word != self.translation_word:
             return
-        self.translation_label.setText(f"“{word}”\n{translation}")
-        self.translate_btn.setEnabled(True)
+        self.translation_label.setText(translation)
 
-    def show_translation_error(self, word, message):
-        if word != self.translation_word:
-            return
-        self.translation_label.setText(f"“{word}”翻译失败：{message}")
-        self.translate_btn.setEnabled(True)
-
-    def abort_active_request(self):
-        reply = self.active_reply
-        self.active_reply = None
-        if not reply:
-            return
-        try:
-            reply.finished.disconnect()
-        except TypeError:
-            pass
-        reply.abort()
-        reply.deleteLater()
+    def show_dictionary_error(self, message):
+        self.translation_label.setText(message)
 
     def delete_selected(self):
         word = self.current_word()
@@ -394,9 +276,7 @@ class WordBookWidget(QWidget):
             return
 
         if word == self.translation_word:
-            self.abort_active_request()
             self.translation_word = ""
-            self.translate_btn.setEnabled(True)
             self.translation_label.setText(f"已删除“{word}”。")
         self.refresh_list()
 
@@ -408,7 +288,7 @@ class WordBookWidget(QWidget):
         self.list_widget.setCurrentItem(item)
         word = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu()
-        translate_action = menu.addAction("🌐 翻译该单词")
+        translate_action = menu.addAction("📚 查询词典")
         delete_action = menu.addAction("🗑️ 删除该单词")
         action = menu.exec(self.list_widget.mapToGlobal(position))
 
@@ -422,6 +302,10 @@ class WordBookWidget(QWidget):
             self.close()
             return
         super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        self.dictionary.close()
+        super().closeEvent(event)
 
     def load_words(self):
         if not DATA_FILE.exists():
