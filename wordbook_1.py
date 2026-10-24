@@ -74,77 +74,52 @@ class WordBookWidget(QWidget):
         layout.addWidget(self.list_widget)
         self.setLayout(layout)
 
-        def add_word(self):
-            word = self.input_field.text().strip()
-            if not word or word in self.words:
-                self.input_field.clear()
-                return
-            self.words.append(word)
-            self.words = sorted(self.words, key=str.lower)
-            self.save_words()
-            self.refresh_list()
+    def add_word(self):
+        word = self.input_field.text().strip()
+        if not word or word in self.words:
             self.input_field.clear()
+            return
+        self.words.append(word)
+        self.words = sorted(self.words, key=str.lower)
+        self.save_words()
+        self.refresh_list()
+        self.input_field.clear()
 
-        # 右键删除功能
-        def show_context_menu(self, pos):
-            item = self.list_widget.itemAt(pos)
-            if item:
-                menu = QMenu()
-                delete_action = menu.addAction("🗑️ 删除该单词")
-                action = menu.exec(self.list_widget.mapToGlobal(pos))
-                if action == delete_action:
-                    word = item.text()
-                    self.words.remove(word)
-                    self.save_words()
-                    self.refresh_list()
+    def refresh_list(self):
+        self.list_widget.clear()
+        for w in self.words:
+            self.list_widget.addItem(w)
 
-        # 按 ESC 键直接关闭窗口
-        def keyPressEvent(self, event):
-            if event.key() == Qt.Key.Key_Escape:
-                self.close()
+    # 右键删除功能
+    def show_context_menu(self, pos):
+        item = self.list_widget.itemAt(pos)
+        if item:
+            menu = QMenu()
+            delete_action = menu.addAction("🗑️ 删除该单词")
+            action = menu.exec(self.list_widget.mapToGlobal(pos))
+            if action == delete_action:
+                word = item.text()
+                self.words.remove(word)
+                self.save_words()
+                self.refresh_list()
 
-        def load_words(self):
-            if os.path.exists(DATA_FILE):
-                try:
-                    with open(DATA_FILE, "r", encoding="utf-8") as f:
-                        return json.load(f)
-                except Exception:
-                    return []
-            return []
+    # 按 ESC 键直接关闭窗口
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
 
-        def save_words(self):
-            with open(DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.words, f, ensure_ascii=False, indent=2)
+    def load_words(self):
+        if os.path.exists(DATA_FILE):
+            try:
+                with open(DATA_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return []
+        return []
 
-        def refresh_list(self):
-            self.list_widget.clear()
-            for w in self.words:
-                self.list_widget.addItem(w)
-
-            # 👇👇👇 在这里加入搜索框 👇👇👇
-            self.search_field = QLineEdit()
-            self.search_field.setPlaceholderText("🔍 搜索单词...")
-            self.search_field.setStyleSheet(
-                "padding: 6px; border: 1px solid #bbb; border-radius: 4px;"
-            )
-            # 关键：只要搜索框里的字变了，就去刷新列表
-            self.search_field.textChanged.connect(self.refresh_list)
-            layout.addWidget(self.search_field)
-            # 👆👆👆 ------------------ 👆👆👆
-            layout.addWidget(self.list_widget)  # 原有的代码
-
-            # 👇👇👇 在这里加入删除按钮区 👇👇👇
-            bottom_row = QHBoxLayout()
-            delete_btn = QPushButton("🗑️ 删除选中")
-            delete_btn.clicked.connect(self.delete_selected_word)  # 点击触发删除方法
-            delete_btn.setStyleSheet("""
-            QPushButton { background: #ff6b6b; color: white; border-radius: 4px; padding: 6px 14px; }
-            QPushButton:hover { background: #e65c5c; }
-            """)
-            bottom_row.addStretch()  # 让按钮靠右边
-            bottom_row.addWidget(delete_btn)
-            layout.addLayout(bottom_row)
-            # 👆👆👆 ------------------ 👆👆👆
+    def save_words(self):
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.words, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
