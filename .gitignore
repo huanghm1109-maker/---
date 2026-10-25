@@ -9,3 +9,7 @@ __pycache__/
 
 # ECDICT 原始 CSV 只用于生成 data/ecdict.sqlite3
 .ecdict-source/
+
+# 数据库迁移备份和下载中的临时文件
+data/*.bak
+*.part

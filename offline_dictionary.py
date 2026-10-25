@@ -6,6 +6,7 @@ from pathlib import Path
 
 DICTIONARY_FILE = Path(__file__).resolve().parent / "data" / "ecdict.sqlite3"
 ENGLISH_WORD_PATTERN = re.compile(r"[A-Za-z]+(?:['-][A-Za-z]+)*")
+CET_TAGS = ("cet4", "cet6")
 
 
 class DictionaryUnavailableError(RuntimeError):
@@ -22,6 +23,24 @@ class DictionaryEntry:
     phonetic: str
     translation: str
     definition: str
+    tag: str
+
+    @property
+    def cet_levels(self):
+        """返回该词拥有的 CET 标签，例如 ("CET4", "CET6")。"""
+
+        tags = {
+            token
+            for token in re.split(r"[\s,;]+", self.tag.casefold().strip())
+            if token
+        }
+        return tuple(tag.upper() for tag in CET_TAGS if tag in tags)
+
+    @property
+    def is_cet(self):
+        """该词是否至少属于 CET4 或 CET6。"""
+
+        return bool(self.cet_levels)
 
 
 class OfflineDictionary:
@@ -52,7 +71,7 @@ class OfflineDictionary:
         try:
             row = self.connection.execute(
                 """
-                SELECT word, phonetic, translation, definition
+                SELECT word, phonetic, translation, definition, tag
                 FROM entries
                 WHERE normalized = ?
                 """,

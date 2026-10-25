@@ -27,6 +27,8 @@ from offline_dictionary import (
 # 使用 Path 拼接路径，比直接写字符串更不容易出错。
 BASE_DIR = Path(__file__).resolve().parent
 DATA_FILE = BASE_DIR / "words.json"
+SEARCH_MODE_CET = "四六级词汇优先"
+SEARCH_MODE_ALL = "全词库搜索"
 
 
 @st.cache_resource
@@ -134,8 +136,16 @@ def find_saved_word(entry: DictionaryEntry, words: list[str]) -> str | None:
     return None
 
 
-def show_result(entry: DictionaryEntry) -> None:
+def show_result(entry: DictionaryEntry, search_mode: str) -> None:
     """把 DictionaryEntry 对象转换成页面上的结果区域。"""
+
+    if entry.is_cet:
+        cet_levels = " / ".join(entry.cet_levels)
+        st.success(f"🎯 四六级词汇：{cet_levels}")
+    elif search_mode == SEARCH_MODE_CET:
+        st.warning(
+            "该词不属于四六级范围，已为你展示全库释义。"
+        )
 
     st.subheader(entry.word)
     if entry.phonetic:
@@ -173,6 +183,12 @@ def main() -> None:
 
     # 使用表单可以把输入和按钮组合起来，点击“查询”时才提交一次。
     with st.form("search_form", clear_on_submit=False):
+        search_mode = st.selectbox(
+            "搜索范围",
+            options=[SEARCH_MODE_CET, SEARCH_MODE_ALL],
+            index=0,
+            help="优先模式会标注四六级词汇；非四六级词仍会回退到全词库显示。",
+        )
         query = st.text_input(
             "搜索单词",
             placeholder="例如：apple",
@@ -183,14 +199,17 @@ def main() -> None:
     if submitted:
         # 表单提交后，把搜索词保存下来；单击“收藏”等按钮时仍能显示结果。
         st.session_state.last_query = query.strip()
+        st.session_state.last_mode = search_mode
 
     st.divider()
     st.subheader("查询结果")
 
     last_query = st.session_state.get("last_query", "")
+    last_mode = st.session_state.get("last_mode", SEARCH_MODE_CET)
     if not last_query:
         st.info("请在上方输入英文单词，然后点击“查询”。")
         return
+    st.caption(f"当前搜索范围：{last_mode}")
 
     try:
         # validate_word 同时完成格式检查与词典查询。
@@ -202,7 +221,7 @@ def main() -> None:
         st.error(str(error))
         return
 
-    show_result(entry)
+    show_result(entry, last_mode)
 
     words = load_words()
     with st.expander(f"我的生词本（{len(words)} 个）"):
