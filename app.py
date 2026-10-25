@@ -12,6 +12,7 @@ Streamlit 的特点是“脚本从上到下执行”。页面上的按钮被点�
 """
 
 import json
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -26,7 +27,9 @@ from offline_dictionary import (
 
 # 使用 Path 拼接路径，比直接写字符串更不容易出错。
 BASE_DIR = Path(__file__).resolve().parent
-DATA_FILE = BASE_DIR / "words.json"
+DATA_FILE = Path(
+    os.environ.get("WORD_BOOK_FILE", BASE_DIR / "words.json")
+).expanduser().resolve()
 SEARCH_MODE_CET = "四六级词汇优先"
 SEARCH_MODE_ALL = "全词库搜索"
 
@@ -40,6 +43,17 @@ def get_dictionary() -> OfflineDictionary:
     """
 
     return OfflineDictionary(BASE_DIR / "data" / "ecdict.sqlite3")
+
+
+@st.cache_data(ttl="1h", max_entries=2000)
+def lookup_word(word: str) -> DictionaryEntry | None:
+    """查询并缓存生词本中的一个词。
+
+    生词本每次重绘都需要显示 CET 标记，因此标签查询会重复发生。
+    cache_data 按单词缓存结果，并限制最多保存 2000 项，避免缓存无限增长。
+    """
+
+    return get_dictionary().lookup(word)
 
 
 def load_words() -> list[str]:
@@ -110,18 +124,26 @@ def add_to_wordbook(entry: DictionaryEntry) -> bool:
     return True
 
 
-def remove_from_wordbook(entry: DictionaryEntry) -> bool:
+def remove_word_from_wordbook(word: str) -> bool:
     """从生词本删除一个单词，并保留文件中已有的拼写形式。"""
 
     words = load_words()
     remaining_words = [
-        word for word in words if word.casefold() != entry.word.casefold()
+        saved_word
+        for saved_word in words
+        if saved_word.casefold() != word.casefold()
     ]
     if len(remaining_words) == len(words):
         return False
 
     save_words(remaining_words)
     return True
+
+
+def remove_from_wordbook(entry: DictionaryEntry) -> bool:
+    """删除对象写法，方便查询结果区域复用底层删词函数。"""
+
+    return remove_word_from_wordbook(entry.word)
 
 
 def find_saved_word(entry: DictionaryEntry, words: list[str]) -> str | None:
@@ -134,6 +156,106 @@ def find_saved_word(entry: DictionaryEntry, words: list[str]) -> str | None:
         if word.casefold() == entry.word.casefold():
             return word
     return None
+
+
+def wordbook_label(word: str, entry: DictionaryEntry | None) -> str:
+    """生成“单词 + CET 等级徽标”的折叠标题。"""
+
+    label = f"**{word}**"
+    if entry is None or not entry.is_cet:
+        return label
+
+    badge_colors = {"CET4": "green", "CET6": "violet"}
+    badges = [
+        f":{badge_colors[level]}-badge[{level}]"
+        for level in entry.cet_levels
+    ]
+    return f"{label} {' '.join(badges)}"
+
+
+def render_wordbook_entry(word: str) -> None:
+    """绘制一行生词；只有展开时才加载并显示释义。"""
+
+    try:
+        entry = lookup_word(word)
+    except DictionaryUnavailableError as error:
+        entry = None
+        lookup_error = str(error)
+    else:
+        lookup_error = ""
+
+    expander = st.expander(
+        wordbook_label(word, entry),
+        key=f"wordbook_expander_{word.casefold()}",
+        on_change="rerun",
+        icon=":material/book_2:",
+    )
+
+    # .open 需要 on_change="rerun" 才有值；折叠时跳过释义渲染。
+    if not expander.open:
+        return
+
+    with expander:
+        if lookup_error:
+            st.error(lookup_error)
+        elif entry is None:
+            st.warning("离线词典中没有找到这个生词。")
+        else:
+            if entry.phonetic:
+                st.caption(f"音标：/{entry.phonetic}/")
+
+            st.markdown("**中文释义**")
+            translation = entry.translation or "词典中没有中文释义。"
+            st.text(translation.replace("\\n", "\n"))
+
+            if entry.definition:
+                st.markdown("**英文释义**")
+                st.text(entry.definition.replace("\\n", "\n"))
+
+        if st.button(
+            "删除这个单词",
+            key=f"delete_word_{word.casefold()}",
+            icon=":material/delete:",
+            type="secondary",
+        ):
+            if remove_word_from_wordbook(word):
+                st.toast(f"已删除“{word}”")
+            st.rerun()
+
+
+@st.fragment
+def render_wordbook() -> None:
+    """搜索并展示生词本；搜索只重跑这个独立区域。"""
+
+    st.header("我的生词本")
+    words = sorted(load_words(), key=str.casefold)
+
+    search_text = st.text_input(
+        "在生词本中搜索",
+        type="search",
+        placeholder="输入单词或字母",
+        key="wordbook_search",
+        live="300ms",
+    )
+    normalized_search = (search_text or "").strip().casefold()
+    displayed_words = [
+        word for word in words if normalized_search in word.casefold()
+    ]
+
+    if normalized_search:
+        st.caption(f"找到 {len(displayed_words)} 个，共 {len(words)} 个生词")
+    else:
+        st.caption(f"共 {len(words)} 个生词，点击单词可展开或收起释义")
+
+    if not words:
+        st.info("生词本还是空的。查询单词后，可以点击“加入生词本”。")
+        return
+    if not displayed_words:
+        st.info("生词本中没有匹配的单词。")
+        return
+
+    for word in displayed_words:
+        render_wordbook_entry(word)
 
 
 def show_result(entry: DictionaryEntry, search_mode: str) -> None:
@@ -208,27 +330,20 @@ def main() -> None:
     last_mode = st.session_state.get("last_mode", SEARCH_MODE_CET)
     if not last_query:
         st.info("请在上方输入英文单词，然后点击“查询”。")
-        return
-    st.caption(f"当前搜索范围：{last_mode}")
-
-    try:
-        # validate_word 同时完成格式检查与词典查询。
-        entry = get_dictionary().validate_word(last_query)
-    except InvalidWordError as error:
-        st.warning(str(error))
-        return
-    except DictionaryUnavailableError as error:
-        st.error(str(error))
-        return
-
-    show_result(entry, last_mode)
-
-    words = load_words()
-    with st.expander(f"我的生词本（{len(words)} 个）"):
-        if words:
-            st.write("、".join(words))
+    else:
+        st.caption(f"当前搜索范围：{last_mode}")
+        try:
+            # validate_word 同时完成格式检查与词典查询。
+            entry = get_dictionary().validate_word(last_query)
+        except InvalidWordError as error:
+            st.warning(str(error))
+        except DictionaryUnavailableError as error:
+            st.error(str(error))
         else:
-            st.caption("生词本还是空的。查询单词后，可以点击“加入生词本”。")
+            show_result(entry, last_mode)
+
+    st.divider()
+    render_wordbook()
 
 
 # 直接执行 app.py 时进入 main；被其他文件导入时不会自动运行页面。
