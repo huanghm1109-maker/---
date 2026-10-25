@@ -46,6 +46,7 @@ DATA_FILE = Path(
 SEARCH_MODE_CET = "四六级词汇优先"
 SEARCH_MODE_ALL = "全词库搜索"
 LOCAL_USER = "本地模式"
+MIN_COOKIE_EXPIRY_DAYS = 30
 
 
 @st.cache_resource
@@ -98,8 +99,9 @@ def get_authenticator_settings() -> dict:
     return {
         "cookie_name": str(settings.get("cookie_name", "")).strip(),
         "cookie_key": str(settings.get("cookie_key", "")).strip(),
-        "cookie_expiry_days": float(
-            settings.get("cookie_expiry_days", 7)
+        "cookie_expiry_days": max(
+            MIN_COOKIE_EXPIRY_DAYS,
+            float(settings.get("cookie_expiry_days", 30)),
         ),
         "registration_code": str(
             settings.get("registration_code", "")

@@ -151,7 +151,7 @@ Copy-Item .\.streamlit\secrets.toml.example .\.streamlit\secrets.toml
 [authenticator]
 cookie_name = "wordbook_auth"
 cookie_key = "这里填写上一步生成的随机字符串"
-cookie_expiry_days = 7
+cookie_expiry_days = 30
 registration_code = "自己设置一个班级邀请码"
 
 [database]
