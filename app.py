@@ -155,6 +155,7 @@ def render_registration_form(
         return
 
     if created:
+        load_registered_users.clear()
         st.success("注册成功，请切换到“登录”页签。")
     else:
         st.error("该用户名已经被注册。")
@@ -162,6 +163,9 @@ def render_registration_form(
 
 def authenticate_user():
     """显示用户注册/登录页；成功时返回用户名和 authenticator。"""
+
+    if os.environ.get("WORD_BOOK_ALLOW_LOCAL_MODE") == "1":
+        return None, None
 
     database_url = get_database_url()
     if not database_url:
@@ -177,7 +181,7 @@ def authenticate_user():
 
     try:
         store = get_user_wordbook_store()
-        users = store.list_users()
+        users = load_registered_users()
     except UserWordBookError as error:
         st.error(str(error))
         st.stop()
@@ -190,9 +194,6 @@ def authenticate_user():
         auto_hash=False,
     )
 
-    st.title("📖 生词本")
-    st.caption("请使用自己的用户名登录，生词会分别保存。")
-
     try:
         # 先检查 Cookie；已登录时不再绘制登录/注册页签。
         authenticator.login(location="unrendered")
@@ -202,6 +203,9 @@ def authenticate_user():
     if st.session_state.get("authentication_status"):
         username = normalize_username(st.session_state["username"])
         return username, authenticator
+
+    st.subheader("账户登录")
+    st.caption("请使用自己的用户名登录，生词会分别保存。")
 
     login_tab, register_tab = st.tabs(["登录", "注册新账号"])
     with login_tab:
@@ -235,6 +239,13 @@ def authenticate_user():
         )
 
     st.stop()
+
+
+@st.cache_data(ttl="5m", max_entries=10, show_spinner=False)
+def load_registered_users() -> list[dict]:
+    """缓存账号列表，避免每次页面交互都查询 Supabase。"""
+
+    return get_user_wordbook_store().list_users()
 
 
 @st.cache_resource
@@ -550,10 +561,9 @@ def main() -> None:
     """页面入口：安排输入框、按钮和结果区域。"""
 
     st.set_page_config(page_title="离线生词本", page_icon="📖", layout="centered")
-    username, authenticator = authenticate_user()
-
     st.title("📖 离线生词本")
-    st.caption("输入一个英文单词，从本地 ECDICT 词典中查询释义。")
+    st.caption("离线查询四六级释义，并分别保存每位同学的单词。")
+    username, authenticator = authenticate_user()
 
     with st.sidebar:
         if username is None:

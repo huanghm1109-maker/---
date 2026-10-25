@@ -3,6 +3,7 @@
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 class UserWordBookError(RuntimeError):
@@ -13,12 +14,45 @@ class UserWordBookStore:
     """使用 PostgreSQL 或本地 SQLite 保存账号和每位用户的生词。"""
 
     def __init__(self, database_url=None, sqlite_path=None):
-        self.database_url = database_url
+        self.database_url = self.validate_database_url(database_url)
         self.sqlite_path = (
             Path(sqlite_path) if sqlite_path is not None else None
         )
         self.is_postgres = bool(database_url)
         self.create_schema()
+
+    @staticmethod
+    def validate_database_url(database_url):
+        """在连接前识别未替换的模板占位符。"""
+
+        if not database_url:
+            return None
+        try:
+            parsed = urlsplit(database_url)
+        except ValueError as error:
+            raise UserWordBookError(
+                "Supabase 数据库连接串格式不正确"
+            ) from error
+
+        if parsed.scheme not in {"postgres", "postgresql"}:
+            raise UserWordBookError(
+                "数据库连接串必须以 postgresql:// 开头"
+            )
+        if not parsed.hostname or parsed.hostname.casefold() in {
+            "host",
+            "hostname",
+            "your-host",
+            "example.com",
+        }:
+            raise UserWordBookError(
+                "Supabase 连接串仍是示例地址。请从 Supabase 的 "
+                "Connect → Database → Connection string 复制完整 URI。"
+            )
+        if not parsed.username or not parsed.password:
+            raise UserWordBookError(
+                "Supabase 连接串缺少用户名或数据库密码"
+            )
+        return database_url
 
     def _connect(self):
         if self.is_postgres:

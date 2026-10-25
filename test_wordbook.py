@@ -9,6 +9,10 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 
+# 测试不读取真实 Supabase secrets，使用隔离的本地模式。
+os.environ["WORD_BOOK_ALLOW_LOCAL_MODE"] = "1"
+
+
 class WordbookUiTest(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -43,6 +47,14 @@ class WordbookUiTest(unittest.TestCase):
         self.assertIn("CET4", labels["wordbook_expander_zebra"])
         self.assertIn("CET6", labels["wordbook_expander_zebra"])
         self.assertEqual(len(app.text), 0)
+
+    def test_page_has_only_one_title(self):
+        app = self.run_app(["apple"])
+
+        self.assertEqual(
+            [title.value for title in app.title],
+            ["📖 离线生词本"],
+        )
 
     def test_wordbook_search_filters_rows(self):
         app = self.run_app(["apple", "zebra"])

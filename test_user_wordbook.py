@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from user_wordbook import UserWordBookStore
+from user_wordbook import UserWordBookError, UserWordBookStore
 
 
 class UserWordBookStoreTest(unittest.TestCase):
@@ -71,6 +71,14 @@ class UserWordBookStoreTest(unittest.TestCase):
             [(user["username"], user["password_hash"]) for user in users],
             [("student-a", "hash-a"), ("student-b", "hash-b")],
         )
+
+    def test_placeholder_database_host_is_rejected_before_connect(self):
+        with self.assertRaisesRegex(UserWordBookError, "示例地址"):
+            UserWordBookStore(
+                database_url=(
+                    "postgresql://postgres:password@host:5432/postgres"
+                )
+            )
 
 
 if __name__ == "__main__":

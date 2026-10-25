@@ -4,10 +4,14 @@
     python -m unittest -v test_cet_search.py
 """
 
+import os
 import unittest
 
 from streamlit.testing.v1 import AppTest
 
+
+# 测试不读取真实 Supabase secrets，使用隔离的本地模式。
+os.environ["WORD_BOOK_ALLOW_LOCAL_MODE"] = "1"
 
 CET_MODE = "四六级词汇优先"
 ALL_MODE = "全词库搜索"
