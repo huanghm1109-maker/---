@@ -17,6 +17,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from meaning_parser import parse_meanings
 from offline_dictionary import (
     DictionaryEntry,
     DictionaryUnavailableError,
@@ -158,19 +159,54 @@ def find_saved_word(entry: DictionaryEntry, words: list[str]) -> str | None:
     return None
 
 
+def cet_badge_markdown(entry: DictionaryEntry | None) -> str:
+    """生成可插入 Markdown 正文的 CET4/CET6 徽标。"""
+
+    if entry is None or not entry.is_cet:
+        return ""
+
+    badge_colors = {"CET4": "green", "CET6": "violet"}
+    return " ".join(
+        f":{badge_colors[level]}-badge[{level}]"
+        for level in entry.cet_levels
+    )
+
+
 def wordbook_label(word: str, entry: DictionaryEntry | None) -> str:
     """生成“单词 + CET 等级徽标”的折叠标题。"""
 
     label = f"**{word}**"
-    if entry is None or not entry.is_cet:
+    badges = cet_badge_markdown(entry)
+    if not badges:
         return label
+    return f"{label} {badges}"
 
-    badge_colors = {"CET4": "green", "CET6": "violet"}
-    badges = [
-        f":{badge_colors[level]}-badge[{level}]"
-        for level in entry.cet_levels
-    ]
-    return f"{label} {' '.join(badges)}"
+
+def render_meanings(entry: DictionaryEntry, key_prefix: str) -> None:
+    """先显示普通/CET 重点释义，再把专业释义放入可选开关。"""
+
+    sections = parse_meanings(entry.translation)
+    cet_badges = cet_badge_markdown(entry)
+    heading = "四六级重点词释义" if cet_badges else "常用释义"
+
+    st.markdown(f"**{heading}** {cet_badges}")
+    if cet_badges:
+        st.caption("ECDICT 标签属于词条级；这里优先展示非专业领域释义。")
+
+    if sections.general:
+        for meaning in sections.general:
+            st.markdown(f"- {meaning}")
+    else:
+        st.caption("该词没有单独的普通释义。")
+
+    if sections.specialized:
+        show_specialized = st.toggle(
+            f"显示专业领域释义（{len(sections.specialized)} 条）",
+            key=f"show_special_{key_prefix}_{entry.word.casefold()}",
+        )
+        if show_specialized:
+            for meaning in sections.specialized:
+                st.markdown(f"- **[{meaning.domain}]** {meaning.text}")
 
 
 def render_wordbook_entry(word: str) -> None:
@@ -204,9 +240,7 @@ def render_wordbook_entry(word: str) -> None:
             if entry.phonetic:
                 st.caption(f"音标：/{entry.phonetic}/")
 
-            st.markdown("**中文释义**")
-            translation = entry.translation or "词典中没有中文释义。"
-            st.text(translation.replace("\\n", "\n"))
+            render_meanings(entry, key_prefix="wordbook")
 
             if entry.definition:
                 st.markdown("**英文释义**")
@@ -273,10 +307,7 @@ def show_result(entry: DictionaryEntry, search_mode: str) -> None:
     if entry.phonetic:
         st.caption(f"/{entry.phonetic}/")
 
-    st.markdown("**中文释义**")
-    translation = entry.translation or "词典中没有中文释义。"
-    # ECDICT 中的换行有时保存成字面量 "\\n"，这里转换成真正的换行。
-    st.write(translation.replace("\\n", "\n"))
+    render_meanings(entry, key_prefix="query")
 
     if entry.definition:
         with st.expander("查看英文释义"):

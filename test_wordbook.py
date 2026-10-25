@@ -59,8 +59,42 @@ class WordbookUiTest(unittest.TestCase):
         app.run(timeout=20)
 
         self.assertEqual(len(app.exception), 0)
-        self.assertTrue(any("苹果" in text.value for text in app.text))
+        self.assertTrue(
+            any("苹果" in markdown.value for markdown in app.markdown)
+        )
         self.assertTrue(any(button.key == "delete_word_apple" for button in app.button))
+
+    def test_domain_meaning_is_hidden_until_toggle_is_enabled(self):
+        app = self.run_app(["computer"])
+        app.session_state["wordbook_expander_computer"] = True
+        app.run(timeout=20)
+
+        visible_text = "\n".join(markdown.value for markdown in app.markdown)
+        self.assertIn("电脑", visible_text)
+        self.assertNotIn("[计] 计算机", visible_text)
+
+        app.toggle(key="show_special_wordbook_computer").set_value(True).run(
+            timeout=20
+        )
+
+        expanded_text = "\n".join(markdown.value for markdown in app.markdown)
+        self.assertIn("**[计]**", expanded_text)
+        self.assertIn("计算机", expanded_text)
+        self.assertEqual(len(app.exception), 0)
+
+    def test_cet_common_meaning_is_marked_before_domain_meaning(self):
+        app = self.run_app(["zebra"])
+        app.session_state["wordbook_expander_zebra"] = True
+        app.run(timeout=20)
+
+        markdown_values = [markdown.value for markdown in app.markdown]
+        cet_heading_index = next(
+            index
+            for index, value in enumerate(markdown_values)
+            if "四六级重点词释义" in value
+        )
+        self.assertIn("CET4", markdown_values[cet_heading_index])
+        self.assertIn("CET6", markdown_values[cet_heading_index])
 
     def test_delete_button_removes_only_selected_word(self):
         app = self.run_app(["apple", "zebra"])
