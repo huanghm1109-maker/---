@@ -171,7 +171,7 @@ streamlit run app.py
 打开：
 
 ```text
-http://localhost:8501/wordbook
+http://localhost:8501
 ```
 
 验证顺序：
@@ -193,7 +193,7 @@ http://localhost:8501/wordbook
 1. 把代码提交并推送到 GitHub。
 2. 在 Streamlit Community Cloud 创建 App。
 3. 在 App 的 `Settings → Secrets` 中粘贴与本地 `secrets.toml` 相同的内容。
-4. 部署后得到类似 `https://your-app.streamlit.app/wordbook` 的网址。
+4. 部署后得到类似 `https://wordbook-your-name.streamlit.app` 的网址。
 
 云端不需要 Microsoft Entra，也不需要 OIDC 回调地址。
 
