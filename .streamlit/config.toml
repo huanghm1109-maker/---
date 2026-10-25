@@ -1,6 +1,2 @@
 [server]
 baseUrlPath = "wordbook"
-
-[browser]
-serverAddress = "localhost"
-serverPort = 8501

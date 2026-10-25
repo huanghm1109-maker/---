@@ -7,6 +7,9 @@ __pycache__/
 # 忽略本地环境变量文件
 .env
 
+# 登录客户端密钥、Cookie 签名密钥和数据库连接串
+.streamlit/secrets.toml
+
 # ECDICT 原始 CSV 只用于生成 data/ecdict.sqlite3
 .ecdict-source/
 
